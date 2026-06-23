@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cursos — Setor de Capacitação | CEPDEC/ES</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="uploadScreen">
+  <div class="hero-shell">
+    <div class="hero-top">
+      <div class="hero-copy">
+        <span class="hero-kicker">Cursos · Setor de Capacitação</span>
+        <h1>CAPACITAÇÃO DE PÚBLICO EXTERNO</h1>
+        <p>Dashboard executivo integrado à base pública de cursos da CEPDEC/ES.</p>
+        <div class="brand-row">
+          <div class="brand-chip"><img src="img/CEPDEC.png" alt="Símbolo da CEPDEC ES"><span>CEPDEC/ES</span></div>
+          <div class="brand-chip"><img src="img/Escola_DC.png" alt="Símbolo da Escola de Defesa Civil"><span>Escola de Defesa Civil</span></div>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="status-card" id="statusCard" role="status" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <h2 id="statusTitle">Carregando dados</h2>
+          <p id="statusMessage">Consultando a planilha publicada no Google Sheets…</p>
+          <button class="btn" id="retryBtn" type="button" hidden>Tentar novamente</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="dashboard">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="header-emblem header-emblem-left">
+        <img src="img/CEPDEC.png" alt="Distintivo da CEPDEC">
+      </div>
+      <div class="header-center">
+        <div class="brand">
+          <h1>Cursos — Setor de Capacitação</h1>
+          <p>Dashboard executivo · CAPACITAÇÃO DE PÚBLICO EXTERNO</p>
+        </div>
+        <div class="top-actions">
+          <div class="pill data-source is-updating" id="fileBadge">Atualizando dados…</div>
+          <button class="btn" id="refreshBtn" type="button">Atualizar agora</button>
+        </div>
+      </div>
+      <div class="header-emblem header-emblem-right">
+        <img src="img/Escola_DC.png" alt="Distintivo da Escola de Defesa Civil">
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="filter-shell">
+      <div class="filter-grid dropdown-grid" id="filterGrid"></div>
+    </section>
+
+    <section class="kpis">
+      <article class="kpi b1"><h3>Alunos participantes</h3><div class="num" id="kpiParticipantes">0</div></article>
+      <article class="kpi b2"><h3>Alunos Certificados</h3><div class="num" id="kpiCertificado">0</div></article>
+      <article class="kpi b3"><h3>Alunos declarados</h3><div class="num" id="kpiDeclarado">0</div></article>
+      <article class="kpi b4"><h3>Cursos ofertados</h3><div class="num" id="kpiCursos">0</div></article>
+      <article class="kpi b5"><h3>Estados participantes</h3><div class="num" id="kpiEstados">0</div></article>
+      <article class="kpi b6"><h3>Municípios participantes</h3><div class="num" id="kpiMunicipios">0</div></article>
+    </section>
+
+    <section class="grid-2 section">
+      <article class="card pie">
+        <div class="card-head"><div><h2>Inscritos × gênero</h2></div></div>
+        <div class="pie-wrap"><canvas id="chartSexoPizza"></canvas></div>
+        <div class="legend-cards">
+          <div class="legend-card masc-card" id="legendMasc"><strong>Masculino</strong><span id="sexoMasc">0</span></div>
+          <div class="legend-card fem-card" id="legendFem"><strong>Feminino</strong><span id="sexoFem">0</span></div>
+          <div class="legend-card nd-card" id="legendNd"><strong>Pref. não dizer</strong><span id="sexoNd">0</span></div>
+        </div>
+      </article>
+      <article class="card medium">
+        <div class="card-head"><div><h2>Participação feminina nos cursos — comparativo anual</h2></div></div>
+        <canvas id="chartFemininoAno"></canvas>
+      </article>
+    </section>
+
+    <section class="section">
+      <article class="card large">
+        <div class="card-head"><div><h2>Alunos inscritos por município</h2></div></div>
+        <canvas id="chartMunicipio"></canvas>
+      </article>
+    </section>
+
+    <section class="section">
+      <article class="card large">
+        <div class="card-head"><div><h2>Alunos inscritos por curso</h2></div></div>
+        <canvas id="chartCurso"></canvas>
+      </article>
+    </section>
+
+    <section class="grid-2 section">
+      <article class="card pie">
+        <div class="card-head"><div><h2>Integrantes da Defesa Civil do ES</h2></div></div>
+        <div class="pie-wrap"><canvas id="chartDefesaPizza"></canvas></div>
+      </article>
+      <article class="card medium">
+        <div class="card-head"><div><h2>Integrantes da Defesa Civil do ES — por ano</h2></div></div>
+        <canvas id="chartDefesaBar"></canvas>
+      </article>
+    </section>
+
+    <section class="section">
+      <article class="card large">
+        <div class="card-head"><div><h2>Estado participante × alunos</h2></div></div>
+        <canvas id="chartEstadoAluno"></canvas>
+      </article>
+      <div class="note">No indicador "Alunos participantes", cada linha filtrada é contada como participação, sem deduplicação por nome ou CPF, para respeitar casos em que o mesmo aluno cursa mais de uma capacitação no mesmo ano.</div>
+    </section>
+  </main>
+</div>
+
+<script src="js/app.js" defer></script>
+</body>
+</html>
