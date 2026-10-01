@@ -150,6 +150,7 @@ canvas{width:100%!important}
 .option-chip:hover{background:rgba(99,102,241,.10);color:#dfe6fb}
 .option-chip input{display:none}
 .option-chip.active{background:linear-gradient(135deg,rgba(59,130,246,.22),rgba(99,102,241,.22));color:#fff;border-color:rgba(99,102,241,.4)}
+.option-empty{padding:10px;font-size:12px;color:var(--muted);text-align:center;font-style:italic}
 
 /* ===== KPIs (6 boxes with diagonal gradients) ===== */
 .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-bottom:22px;position:relative;z-index:1}

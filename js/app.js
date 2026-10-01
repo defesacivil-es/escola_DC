@@ -1,7 +1,22 @@
 // Dashboard integrado à planilha pública da CEPDEC/ES.
 const SHEET_CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vRrVz9Az5ASfD8yRWvGucRJpQ2JgP9Ih679bE21TmrLZX75SsxG2vzXpItf6CZ6ESqK0UUVJz2UfWfT/pub?gid=1636387945&single=true&output=csv';
 const REFRESH_INTERVAL_MS=5*60*1000;
-const state={raw:[],filtered:[],charts:{},cols:{},filters:{ano:[],curso:[],municipio:[],sexo:[]},lastUpdated:0};
+
+/* =========================================================
+   STATE
+   - filters[key].available = universo de valores possíveis
+   - filters[key].selected  = valores marcados pelo usuário
+   ========================================================= */
+const state={
+  raw:[],filtered:[],charts:{},cols:{},lastUpdated:0,
+  filters:{
+    ano:      { available:[], selected:[] },
+    curso:    { available:[], selected:[] },
+    municipio:{ available:[], selected:[] },
+    sexo:     { available:[], selected:[] }
+  }
+};
+
 const chartsCfg={font:"'Manrope', sans-serif", text:'#e9edf7', textSoft:'#c2cae0', grid:'rgba(148,163,196,.12)', gridStrong:'rgba(148,163,196,.18)'};
 
 /* ===== Color system =====
@@ -19,11 +34,11 @@ const YEAR_PALETTE = [
 ];
 
 // Pie/Doughnut diagonal gradient palette (modern)
-// ALTERADO: Terceira cor agora é um degradê cinza/prata para diferenciar do azul e rosa
+// Terceira cor é um degradê cinza/prata para diferenciar do azul e rosa
 const PIE_GRADIENTS = [
   ['#3b82f6','#06b6d4'],  // Blue → Cyan (Masculino)
   ['#ec4899','#f59e0b'],  // Pink → Amber (Feminino)
-  ['#6b7280','#9ca3af'],  // Cinza → Prata (Pref. não dizer) - NOVA COR
+  ['#6b7280','#9ca3af'],  // Cinza → Prata (Pref. não dizer)
   ['#10b981','#84cc16'],  // Emerald → Lime
   ['#f43f5e','#fb923c'],  // Rose → Orange
 ];
@@ -100,24 +115,36 @@ function normalizeRows(rows){
     municipio:n(row[state.cols.municipio]),conclusao:n(row[state.cols.conclusao]),defesa:n(row[state.cols.defesa])
   }));
 }
+
+/* =========================================================
+   Snapshot / restore (preserva seleções entre refreshes)
+   ========================================================= */
 function selectionSnapshot(){
   const snapshot={};
   filterDefs.forEach(([key])=>{
-    const selectedKey=key+'_selected';
-    if(Object.prototype.hasOwnProperty.call(state.filters,selectedKey)){
-      snapshot[key]={values:[...state.filters[selectedKey]],all:state.filters[selectedKey].length===state.filters[key].length};
-    }
+    snapshot[key]=[...state.filters[key].selected];
   });
   return snapshot;
 }
 function restoreSelections(snapshot){
-  filterDefs.forEach(([key])=>{
-    if(!snapshot[key])return;
-    state.filters[key+'_selected']=snapshot[key].all
-      ? [...state.filters[key]]
-      : snapshot[key].values.filter(value=>state.filters[key].includes(value));
+  // 1) Anos primeiro (afetam available de curso/município)
+  if(snapshot.ano){
+    state.filters.ano.selected = snapshot.ano.filter(v => state.filters.ano.available.includes(v));
+  } else {
+    state.filters.ano.selected = [...state.filters.ano.available];
+  }
+  // 2) Recalcula universos dependentes
+  updateDependentAvailable();
+  // 3) Demais filtros, filtrando pelo available atualizado
+  ['curso','municipio','sexo'].forEach(key=>{
+    if(snapshot[key]){
+      state.filters[key].selected = snapshot[key].filter(v => state.filters[key].available.includes(v));
+    } else {
+      state.filters[key].selected = [...state.filters[key].available];
+    }
   });
 }
+
 function showInitialError(message){
   els.statusCard.classList.add('error');
   els.statusTitle.textContent='Não foi possível carregar os dados';
@@ -129,6 +156,7 @@ function updateBadge(kind,message){
   if(kind)els.fileBadge.classList.add(kind);
   els.fileBadge.textContent=message;
 }
+
 async function loadGoogleSheet({background=false}={}){
   if(background)updateBadge('is-updating','Atualizando dados…');
   else{
@@ -144,7 +172,10 @@ async function loadGoogleSheet({background=false}={}){
     if(!response.ok)throw new Error('O Google Sheets respondeu com o status '+response.status+'.');
     const snapshot=selectionSnapshot();
     state.raw=normalizeRows(parseCsv(await response.text()));
-    buildFilters();restoreSelections(snapshot);applyFilters();
+    buildFilters();
+    restoreSelections(snapshot);
+    renderOptionLists();
+    applyFilters();
     state.lastUpdated=Date.now();
     const time=new Intl.DateTimeFormat('pt-BR',{hour:'2-digit',minute:'2-digit'}).format(state.lastUpdated);
     updateBadge('',`Planilha atualizada às ${time}`);
@@ -157,11 +188,41 @@ async function loadGoogleSheet({background=false}={}){
   }finally{els.refreshBtn.disabled=false}
 }
 
+/* =========================================================
+   FILTROS EM CASCATA
+   ========================================================= */
+/**
+ * Reconstrói o universo de "curso" e "município" a partir dos anos selecionados.
+ * Também remove das seleções atuais qualquer valor que não exista mais.
+ * "Ano" e "Gênero" mantêm o universo completo (não faz sentido restringir).
+ */
+function updateDependentAvailable(){
+  const anosSel = state.filters.ano.selected;
+  const rawNoAno = anosSel.length === 0
+    ? []
+    : state.raw.filter(d => anosSel.includes(d.ano));
+
+  state.filters.curso.available     = uniq(rawNoAno.map(d=>d.curso));
+  state.filters.municipio.available = uniq(rawNoAno.map(d=>d.municipio));
+
+  // Reconcilia seleções (descarta valores que sumiram)
+  state.filters.curso.selected     = state.filters.curso.selected.filter(v=>state.filters.curso.available.includes(v));
+  state.filters.municipio.selected = state.filters.municipio.selected.filter(v=>state.filters.municipio.available.includes(v));
+}
+
 function buildFilters(){
-  state.filters.ano=uniq(state.raw.map(d=>d.ano));
-  state.filters.curso=uniq(state.raw.map(d=>d.curso));
-  state.filters.municipio=uniq(state.raw.map(d=>d.municipio));
-  state.filters.sexo=uniq(state.raw.map(d=>d.sexo));
+  // Universo base
+  state.filters.ano.available       = uniq(state.raw.map(d=>d.ano));
+  state.filters.sexo.available      = uniq(state.raw.map(d=>d.sexo));
+  state.filters.curso.available     = uniq(state.raw.map(d=>d.curso));
+  state.filters.municipio.available = uniq(state.raw.map(d=>d.municipio));
+
+  // Seleção inicial = tudo marcado
+  filterDefs.forEach(([key])=>{
+    state.filters[key].selected = [...state.filters[key].available];
+  });
+
+  // Estrutura HTML dos filtros (dropdowns)
   els.filterGrid.innerHTML='';
   filterDefs.forEach(([key,label])=>{
     const box=document.createElement('div'); box.className='filter-box';
@@ -175,56 +236,132 @@ function buildFilters(){
         <div class="option-list" id="list-${key}"></div>
       </div>`;
     els.filterGrid.appendChild(box);
-    const list=box.querySelector('.option-list');
+
     box.querySelector('.dropdown-toggle').addEventListener('click',e=>{
       document.querySelectorAll('.filter-box').forEach(x=>{if(x!==box)x.classList.remove('open')});
       box.classList.toggle('open'); e.stopPropagation();
     });
-    state.filters[key].forEach(val=>{
-      const b=document.createElement('button');
-      b.className='option-chip active'; b.dataset.key=key; b.dataset.value=val;
-      b.innerHTML=`<input type="checkbox" checked><span>${val}</span>`;
-      b.addEventListener('click',()=>toggleOption(key,val,b));
-      list.appendChild(b);
+    box.querySelectorAll('.filter-actions button').forEach(btn=>{
+      btn.addEventListener('click',()=>bulkAction(btn.dataset.key,btn.dataset.action));
     });
-    box.querySelectorAll('.filter-actions button').forEach(btn=>btn.addEventListener('click',()=>bulkAction(btn.dataset.key,btn.dataset.action)));
   });
 }
-function toggleOption(key,val,btn){
-  const arr=state.filters[key+'_selected']||[...state.filters[key]];
-  const i=arr.indexOf(val);
-  if(i>-1){arr.splice(i,1);btn.classList.remove('active')} else {arr.push(val);btn.classList.add('active')}
-  state.filters[key+'_selected']=arr; applyFilters();
+
+/**
+ * Redesenha as listas de opções de cada filtro com base em
+ * state.filters[key].available e marca visualmente as selecionadas.
+ */
+function renderOptionLists(){
+  filterDefs.forEach(([key])=>{
+    const list=document.getElementById('list-'+key);
+    if(!list) return;
+    list.innerHTML='';
+    const sel=new Set(state.filters[key].selected);
+
+    if(state.filters[key].available.length===0){
+      const empty=document.createElement('div');
+      empty.className='option-empty';
+      empty.textContent='Sem opções para a seleção atual';
+      list.appendChild(empty);
+    } else {
+      state.filters[key].available.forEach(val=>{
+        const b=document.createElement('button');
+        b.className='option-chip'+(sel.has(val)?' active':'');
+        b.dataset.key=key; b.dataset.value=val;
+        b.innerHTML=`<input type="checkbox" ${sel.has(val)?'checked':''}><span>${val}</span>`;
+        b.addEventListener('click',()=>toggleOption(key,val));
+        list.appendChild(b);
+      });
+    }
+  });
+  updateToggleLabels();
 }
-function bulkAction(key,action){
-  state.filters[key+'_selected']=action==='all'?[...state.filters[key]]:[];
-  document.querySelectorAll(`.option-chip[data-key="${key}"]`).forEach(ch=>ch.classList.toggle('active',action==='all'));
+
+function updateToggleLabels(){
+  document.querySelectorAll('.filter-box').forEach(box=>{
+    const toggle=box.querySelector('.dropdown-toggle');
+    const key=toggle.dataset.dd;
+    const vals=state.filters[key].selected;
+    toggle.textContent = vals.length===0
+      ? 'Nenhum selecionado'
+      : vals.length<=2
+        ? vals.join(', ')
+        : vals.length+' selecionados';
+  });
+}
+
+function toggleOption(key,val){
+  const arr=state.filters[key].selected;
+  const i=arr.indexOf(val);
+  if(i>-1) arr.splice(i,1); else arr.push(val);
+
+  // Se mudou o ano, o universo de curso/município muda → recalcular tudo
+  if(key==='ano'){
+    updateDependentAvailable();
+    renderOptionLists();
+  } else {
+    // Só atualiza visual do chip clicado + labels
+    const chip=document.querySelector(`.option-chip[data-key="${key}"][data-value="${CSS.escape(val)}"]`);
+    if(chip) chip.classList.toggle('active', arr.includes(val));
+    updateToggleLabels();
+  }
   applyFilters();
 }
-function selected(key){ return state.filters[key+'_selected'] ?? [...state.filters[key]] }
+
+function bulkAction(key,action){
+  // "Todos" usa o universo ATUAL desse filtro (já pode estar restrito por ano)
+  state.filters[key].selected = action==='all'
+    ? [...state.filters[key].available]
+    : [];
+
+  if(key==='ano'){
+    updateDependentAvailable();
+    renderOptionLists();
+  } else {
+    renderOptionLists();
+  }
+  applyFilters();
+}
+
+function selected(key){ return state.filters[key].selected; }
+
 document.addEventListener('click',e=>{if(!e.target.closest('.filter-box')) document.querySelectorAll('.filter-box').forEach(x=>x.classList.remove('open'));});
 
+/* ===== apply filters / KPIs ===== */
 function applyFilters(){
   const anos=new Set(selected('ano')), cursos=new Set(selected('curso')),
         municipios=new Set(selected('municipio')), sexos=new Set(selected('sexo'));
-  document.querySelectorAll('.option-chip').forEach(ch=>{const key=ch.dataset.key; ch.classList.toggle('active', selected(key).includes(ch.dataset.value));});
-  document.querySelectorAll('.filter-box').forEach(box=>{
-    const key=box.querySelector('.dropdown-toggle').dataset.dd;
-    const vals=selected(key);
-    box.querySelector('.dropdown-toggle').textContent = vals.length===0 ? 'Nenhum selecionado' : vals.length<=2 ? vals.join(', ') : vals.length + ' selecionados';
-  });
-  state.filtered=state.raw.filter(d=>(!anos.size||anos.has(d.ano))&&(!cursos.size||cursos.has(d.curso))&&(!municipios.size||municipios.has(d.municipio))&&(!sexos.size||sexos.has(d.sexo)));
+
+  state.filtered=state.raw.filter(d=>
+    (!anos.size||anos.has(d.ano)) &&
+    (!cursos.size||cursos.has(d.curso)) &&
+    (!municipios.size||municipios.has(d.municipio)) &&
+    (!sexos.size||sexos.has(d.sexo))
+  );
   renderKPIs(); renderCharts();
 }
+
 function renderKPIs(){
   const d=state.filtered;
   els.kpiParticipantes.textContent=fmt(state.filtered.length);
   els.kpiCertificado.textContent=fmt(d.filter(x=>u(x.conclusao).includes('CERTIFIC')).length);
   els.kpiDeclarado.textContent=fmt(d.filter(x=>u(x.conclusao).includes('DECLAR')).length);
-  els.kpiCursos.textContent=fmt(new Set(d.map(x=>x.curso).filter(Boolean)).size);
+
+  /* =========================================================
+     KPI "Cursos ofertados"
+     Cada combinação única (curso + ano) conta como UMA oferta.
+     Assim, o mesmo curso ofertado em anos diferentes conta
+     como ofertas distintas, conforme esperado.
+     ========================================================= */
+  const ofertas = new Set(
+    d.filter(x => x.curso && x.ano).map(x => `${x.curso}|||${x.ano}`)
+  );
+  els.kpiCursos.textContent=fmt(ofertas.size);
+
   els.kpiEstados.textContent=fmt(new Set(d.map(x=>x.estado).filter(Boolean)).size);
   els.kpiMunicipios.textContent=fmt(new Set(d.map(x=>x.municipio).filter(Boolean)).size);
 }
+
 function destroyCharts(){Object.values(state.charts).forEach(c=>c&&c.destroy()); state.charts={}}
 
 /* ===== Chart.js plugins ===== */
@@ -289,20 +426,13 @@ Chart.defaults.plugins.tooltip = {
 function doughnutLabels(labels,vals){const total=vals.reduce((a,b)=>a+b,0);return labels.map((l,i)=>`${l} · ${fmt(vals[i])} · ${pct(vals[i],total)}`)}
 
 // Função para atualizar as cores das legendas com base nos gradientes do gráfico pizza
-function updateLegendColors() {
-  const mascCard = document.getElementById('legendMasc');
-  const femCard = document.getElementById('legendFem');
-  const ndCard = document.getElementById('legendNd');
-  
-  if(mascCard) {
-    mascCard.style.background = `linear-gradient(135deg, ${PIE_GRADIENTS[0][0]}, ${PIE_GRADIENTS[0][1]})`;
-  }
-  if(femCard) {
-    femCard.style.background = `linear-gradient(135deg, ${PIE_GRADIENTS[1][0]}, ${PIE_GRADIENTS[1][1]})`;
-  }
-  if(ndCard) {
-    ndCard.style.background = `linear-gradient(135deg, ${PIE_GRADIENTS[2][0]}, ${PIE_GRADIENTS[2][1]})`;
-  }
+function updateLegendColors(){
+  const mascCard=document.getElementById('legendMasc');
+  const femCard=document.getElementById('legendFem');
+  const ndCard=document.getElementById('legendNd');
+  if(mascCard) mascCard.style.background=`linear-gradient(135deg, ${PIE_GRADIENTS[0][0]}, ${PIE_GRADIENTS[0][1]})`;
+  if(femCard)  femCard.style.background =`linear-gradient(135deg, ${PIE_GRADIENTS[1][0]}, ${PIE_GRADIENTS[1][1]})`;
+  if(ndCard)   ndCard.style.background  =`linear-gradient(135deg, ${PIE_GRADIENTS[2][0]}, ${PIE_GRADIENTS[2][1]})`;
 }
 
 function renderCharts(){
@@ -310,9 +440,8 @@ function renderCharts(){
   const d=state.filtered;
   const allYears=uniq(d.map(x=>x.ano));
   const yearsSel=selected('ano');
-  // For year-based color mapping we use the FULL list of available years (state.filters.ano)
-  // so a year always keeps the same color regardless of filter selection.
-  const yearList = state.filters.ano;
+  // Lista de anos "universo" (imutável) para colorir de forma estável
+  const yearList=state.filters.ano.available;
   const multi = yearsSel.length>1;
 
   /* ===== Inscritos × gênero (doughnut with diagonal gradients) ===== */
